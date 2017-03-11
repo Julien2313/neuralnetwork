@@ -1,0 +1,17 @@
+# depslib dependency file v1.0
+1489155514 source:f:\neuralnetwork\main.c
+	<stdlib.h>
+	<stdio.h>
+	<time.h>
+	<sys/time.h>
+	<math.h>
+	<windows.h>
+
+1489232457 source:e:\julien\documents\codeblocks\neuralnetwork\main.c
+	<stdlib.h>
+	<stdio.h>
+	<time.h>
+	<sys/time.h>
+	<math.h>
+	<windows.h>
+
