@@ -534,14 +534,7 @@ int cmpfunc (const void * a, const void * b)
 {
     const NEURALNETWORK* n1 = *(NEURALNETWORK **)a;
     const NEURALNETWORK* n2 = *(NEURALNETWORK **)b;
-    printf("============================\n");
-    printf("%d\n", n1->nbrWin);
-    printf("%d\n", n2->nbrWin);
-    //printf("%d - %d = %d\n", *n1->nbrWin, *n2->nbrWin , *n1->nbrWin - *n2->nbrWin );
-    exit(1);
-    return ( n1->nbrWin - n2->nbrWin );
-    exit(1);
-    return 1;
+    return ( n2->nbrWin - n1->nbrWin);
 }
 
 void *ITSTHEFINALCOUNTDOWN(void)
@@ -584,7 +577,11 @@ void *ITSTHEFINALCOUNTDOWN(void)
         for(cpt = 0; cpt < SIZEPOP; cpt++)
             printf("%d\n", networks[cpt]->nbrWin);
 
-        qsort(networks, SIZEPOP, sizeof(NEURALNETWORK), cmpfunc);
+        qsort(networks, SIZEPOP, sizeof(NEURALNETWORK*), cmpfunc);
+        printf("\n");
+
+        for(cpt = 0; cpt < SIZEPOP; cpt++)
+            printf("%d\n", networks[cpt]->nbrWin);
 
     }
 
