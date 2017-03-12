@@ -8,8 +8,9 @@
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
-#define SIZEPOP                     10
-#define NBREPOCH                    1
+#define SIZEPOP                     100
+#define NBREPOCH                    850
+#define NBRMIX                      (int)((SIZEPOP/2)*0.4)
 
 #define CONNECTX                    4 //nbr of disc to connect to win
 #define NBRROWS                     6
@@ -39,7 +40,7 @@ typedef struct NEURON{
 
 typedef struct{
     int player;
-    int nbrWin;
+    float score;
     int nbrLayers;
     int *nbrNeuronsPerLayer;
     NEURON ***neurons;
@@ -52,6 +53,13 @@ typedef struct{
     int nbrDiscs[NBRCOLUMNS];
     int player, turn, wonBy;
 }CONNECTFOUR;
+
+int cmpfunc (const void * a, const void * b)
+{
+    if ( (*(NEURALNETWORK **)b)->score > (*(NEURALNETWORK **)a)->score)
+        return 1;
+    return -1;
+}
 
 float randomFloat(void)
 {
@@ -230,7 +238,7 @@ void mutationsNetwork(NEURALNETWORK *network, int nbrMutations)
 
     for(cptMutations = 0; cptMutations < nbrMutations; cptMutations++)
     {
-        layer   =   randomInt(1, network->nbrLayers);
+        layer   =   randomInt(1, NBRLAYERS);
         row     =   randomInt(0, network->nbrNeuronsPerLayer[layer]);
         weight  =   randomInt(0, network->nbrNeuronsPerLayer[layer-1]);
         pWeight =   &network->neurons[layer][row]->weight[weight];
@@ -250,22 +258,22 @@ NEURALNETWORK *initNetwork(int nbrNeuronsInput, int nbrNeuronsOuput, int nbrLaye
     if(network == NULL)
         return NULL;
 
-    network->nbrLayers            =   nbrLayers;
+    network->nbrLayers            =   NBRLAYERS;
 
-    network->nbrNeuronsPerLayer   =   malloc(sizeof(int) * nbrLayers);
+    network->nbrNeuronsPerLayer   =   malloc(sizeof(int) * NBRLAYERS);
     if(network->nbrNeuronsPerLayer  == NULL)
         return NULL;
 
-    network->neurons            =   malloc(sizeof(NEURON*) * nbrLayers);
+    network->neurons            =   malloc(sizeof(NEURON*) * NBRLAYERS);
     if(network->neurons == NULL)
         return NULL;
 
     network->nbrNeuronsPerLayer[0]            =   nbrNeuronsInput;
-    network->nbrNeuronsPerLayer[nbrLayers - 1]  =   nbrNeuronsOuput;
-    for(layer = 1; layer <  nbrLayers - 1; layer++)
+    network->nbrNeuronsPerLayer[NBRLAYERS - 1]  =   nbrNeuronsOuput;
+    for(layer = 1; layer <  NBRLAYERS - 1; layer++)
         network->nbrNeuronsPerLayer[layer]      =   nbrNeuronsPerLayers;
 
-    for(layer = 0; layer <  nbrLayers; layer++)
+    for(layer = 0; layer <  NBRLAYERS; layer++)
     {
         network->neurons[layer] =   malloc(sizeof(NEURON*) * network->nbrNeuronsPerLayer[layer]);
         if(network->neurons[layer] == NULL)
@@ -301,7 +309,7 @@ NEURALNETWORK *initNetwork(int nbrNeuronsInput, int nbrNeuronsOuput, int nbrLaye
 void randomisatorWeight(NEURALNETWORK *network)
 {
     int layer, row, rowBis;
-    for(layer = 1; layer <  network->nbrLayers; layer++)
+    for(layer = 1; layer <  NBRLAYERS; layer++)
         for(row = 0; row < network->nbrNeuronsPerLayer[layer]; row++)
             for(rowBis = 0; rowBis < network->nbrNeuronsPerLayer[layer-1]; rowBis++)
                 network->neurons[layer][row]->weight[rowBis] = (randomFloat() - 0.5) * 2;
@@ -341,7 +349,7 @@ void feedNeuralNetwork(NEURALNETWORK *network)
 {
     int layer, row, rowBis;
     float totalScore;
-    for(layer = 1; layer <  network->nbrLayers; layer++)
+    for(layer = 1; layer <  NBRLAYERS; layer++)
         for(row = 0; row < network->nbrNeuronsPerLayer[layer]; row++)
         {
             totalScore = 0;
@@ -362,12 +370,12 @@ void printNetwork(NEURALNETWORK *network)
 {
     int layer, row, rowBis;
     printf("==============\n");
-    printf("nbr layers : %d\n", network->nbrLayers);
-    for(layer = 0; layer < network->nbrLayers; layer++)
+    printf("nbr layers : %d\n", NBRLAYERS);
+    for(layer = 0; layer < NBRLAYERS; layer++)
         printf("%d, ", network->nbrNeuronsPerLayer[layer]);
     printf("\n");
 
-    for(layer = 0; layer < network->nbrLayers; layer++)
+    for(layer = 0; layer < NBRLAYERS; layer++)
     {
         for(row = 0; row < network->nbrNeuronsPerLayer[layer]; row++)
         {
@@ -522,7 +530,7 @@ void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
         if(isWin(pConnectFour, row))
         {
             //printBoard(pConnectFour->board);
-            network->nbrWin++;
+            network->score += (NBRCELLS*1.0/pConnectFour->turn);
             return;
         }
         nextPlayer(pConnectFour);
@@ -530,12 +538,72 @@ void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
 
 }
 
-int cmpfunc (const void * a, const void * b)
+NEURALNETWORK *chooseAParent(NEURALNETWORK **networks, NEURALNETWORK *network)
 {
-    const NEURALNETWORK* n1 = *(NEURALNETWORK **)a;
-    const NEURALNETWORK* n2 = *(NEURALNETWORK **)b;
-    return ( n2->nbrWin - n1->nbrWin);
+
+    float total = 0, subTotal = 0;
+    int cptNetwork;
+    float valueRand;
+
+    for(cptNetwork = 0; cptNetwork < SIZEPOP; cptNetwork++)
+    {
+        if(networks[cptNetwork] == network)
+            continue;
+        total += networks[cptNetwork]->score;
+    }
+
+    valueRand = randomFloat() * total;
+
+    for(cptNetwork = 0; cptNetwork < SIZEPOP; cptNetwork++)
+    {
+        if(networks[cptNetwork] == network)
+            continue;
+        subTotal += networks[cptNetwork]->score;
+        if(subTotal >= valueRand)
+            return networks[cptNetwork];
+    }
+
+    for(cptNetwork = SIZEPOP-1; cptNetwork >0; cptNetwork--)
+    {
+        if(networks[cptNetwork] == network)
+            continue;
+        return networks[cptNetwork];
+    }
+    return networks[0];
 }
+
+void mix(NEURALNETWORK **networks)
+{
+    int cptMix;
+    int layer, row, rowBis;
+    float partOf;
+    NEURALNETWORK *networkM;
+    NEURALNETWORK *networkF;
+    NEURALNETWORK *networkC;
+
+
+    for(cptMix = 0; cptMix < NBRMIX; cptMix++)
+    {
+        networkM = chooseAParent(networks, NULL);
+        networkF = chooseAParent(networks, networkM);
+        networkC = initNetwork(NBRCELLS * NBRVALINCELL, NBRCOLUMNS, NBRLAYERS, NBRNEURONSPERHIDDENLAYER);
+
+        for(layer = 1; layer < NBRLAYERS; layer++)
+        {
+            for(row = 0; row < networkM->nbrNeuronsPerLayer[layer]; row++)
+            {
+                for(rowBis = 0; rowBis < networkM->nbrNeuronsPerLayer[layer-1]; rowBis++)
+                {
+                    partOf = randomFloat();
+                    networkC->neurons[layer][row]->weight[rowBis] = networkM->neurons[layer][row]->weight[rowBis] * partOf + networkF->neurons[layer][row]->weight[rowBis] * (1-partOf);
+                }
+            }
+        }
+        free(networks[SIZEPOP - cptMix - 1]);
+        networks[SIZEPOP - cptMix - 1] = networkC;
+    }
+}
+
 
 void *ITSTHEFINALCOUNTDOWN(void)
 {
@@ -561,7 +629,7 @@ void *ITSTHEFINALCOUNTDOWN(void)
     {
         printf("Epoch : %d\n", cptEpoch);
         for(cpt = 0; cpt < SIZEPOP; cpt++)
-            networks[cpt]->nbrWin = 0;
+            networks[cpt]->score = 0;
 
         QueryPerformanceCounter(&start);
 
@@ -573,18 +641,16 @@ void *ITSTHEFINALCOUNTDOWN(void)
         interval = (double) (end.QuadPart - start.QuadPart) / frequency.QuadPart;
         printf("%1.20f\n", interval);
 
-
-        for(cpt = 0; cpt < SIZEPOP; cpt++)
-            printf("%d\n", networks[cpt]->nbrWin);
-
         qsort(networks, SIZEPOP, sizeof(NEURALNETWORK*), cmpfunc);
-        printf("\n");
 
-        for(cpt = 0; cpt < SIZEPOP; cpt++)
-            printf("%d\n", networks[cpt]->nbrWin);
+        mix(networks);
+
+        for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
+            mutationsNetwork(networks[cpt1], NBRLAYERS * NBRNEURONSPERHIDDENLAYER*0.005);
 
     }
-
+    while(1)
+    playAGameHvNN(networks[0], 0);
     return networks;
 }
 
