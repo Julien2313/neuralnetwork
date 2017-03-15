@@ -1,16 +1,22 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
 #include <math.h>
-#include <windows.h>
+
+
+#include <sys/types.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 #define SIZEPOP                     100
-#define NBREPOCH                    850
+#define NBREPOCH                    100
 #define NBRMIX                      (int)((SIZEPOP/2)*0.4)
+#define NBRRESET                    (int)((SIZEPOP/2)*0.2)
 
 #define CONNECTX                    4 //nbr of disc to connect to win
 #define NBRROWS                     6
@@ -18,18 +24,11 @@
 #define NBRVALINCELL                3
 #define NBRCELLS                    NBRROWS * NBRCOLUMNS
 #define NBRLAYERS                   10
-#define NBRNEURONSPERHIDDENLAYER    NBRCELLS * 3
+#define NBRNEURONSPERHIDDENLAYER    NBRCELLS
 #define INPUT                       0
 #define OUTPUT                      NBRLAYERS - 1
 
 #define MAXWEIGHT 2
-
-LARGE_INTEGER frequency;
-LARGE_INTEGER start;
-LARGE_INTEGER end;
-double interval;
-
-clock_t t0clock, t1clock, t2clock, t3clock;
 
 typedef struct NEURON{
     float state;
@@ -397,6 +396,25 @@ void printNetwork(NEURALNETWORK *network)
 
 int chooseAMove(NEURALNETWORK *network, CONNECTFOUR *connectFour)
 {
+    float bestState = 0;
+    int bestColumn, cptColumn;
+
+    for(cptColumn = 0; cptColumn < NBRCOLUMNS; cptColumn++)
+    {
+        if(connectFour->nbrDiscs[cptColumn] >= NBRROWS)
+            continue;
+         if(bestState < network->neurons[OUTPUT][cptColumn]->state)
+         {
+            bestState = network->neurons[OUTPUT][cptColumn]->state;
+            bestColumn = cptColumn;
+         }
+    }
+
+    return bestColumn;
+}
+
+int chooseAMoveByChance(NEURALNETWORK *network, CONNECTFOUR *connectFour)
+{
     float total = 0, subTotal = 0;
     int cptColumn;
     float valueRand;
@@ -462,7 +480,7 @@ void playAGameHvNN(NEURALNETWORK *network, int humanPlayer)
 
     CONNECTFOUR connectFour;
     CONNECTFOUR *pConnectFour;
-    int row;
+    int row, cpt;
 
     pConnectFour = &connectFour;
 
@@ -482,8 +500,12 @@ void playAGameHvNN(NEURALNETWORK *network, int humanPlayer)
         else
         {
             calculOutputNeuralNetwork(network, pConnectFour);
+            for(cpt = 0; cpt < NBRCOLUMNS; cpt++)
+                printf("%d : %f\n", cpt, network->neurons[OUTPUT][cpt]->state);
+            printf("\n");
             row = chooseAMove(network, pConnectFour);
             makeMove(pConnectFour, row);
+            printf("choose : %d\n", row);
         }
 
         if(isWin(pConnectFour, row))
@@ -494,6 +516,30 @@ void playAGameHvNN(NEURALNETWORK *network, int humanPlayer)
         }
         nextPlayer(pConnectFour);
     }
+}
+
+void loadNN(NEURALNETWORK *network)
+{
+	int fd = open("NN.data", O_RDWR | O_CREAT, 0777);
+    if(read(fd, network, sizeof(NEURALNETWORK)) == -1)
+    {
+        printf("Erreur de lecture\n");
+        exit(-1);
+    }
+    close(fd);
+}
+
+void saveNN(NEURALNETWORK *network)
+{
+	int fd = open("NN.data", O_RDWR | O_CREAT, 0777);
+    printf("%ld\n", write(fd, network, sizeof(NEURALNETWORK)));
+    /*
+    if(write(fd, network, sizeof(NEURALNETWORK)) == -1)
+    {
+        printf("Erreur d'ecriture\n");
+        exit(-1);
+    }
+    close(fd);*/
 }
 
 void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
@@ -520,7 +566,7 @@ void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
             network = n2;
 
         calculOutputNeuralNetwork(network, pConnectFour);
-        row = chooseAMove(network, pConnectFour);
+        row = chooseAMoveByChance(network, pConnectFour);
         if(makeMove(pConnectFour, row) != 1)
         {
             printf("PAS BON !\n");
@@ -605,6 +651,14 @@ void mix(NEURALNETWORK **networks)
 }
 
 
+void someResets(NEURALNETWORK **networks)
+{
+    int cptReset;
+
+    for(cptReset = 0; cptReset < NBRRESET; cptReset++)
+        randomisatorWeight(networks[SIZEPOP - cptReset - 1 - NBRMIX]);
+}
+
 void *ITSTHEFINALCOUNTDOWN(void)
 {
     int cpt, cpt1, cpt2, cptEpoch;
@@ -621,43 +675,42 @@ void *ITSTHEFINALCOUNTDOWN(void)
     {
         networks[cpt] = initNetwork(NBRCELLS * NBRVALINCELL, NBRCOLUMNS, NBRLAYERS, NBRNEURONSPERHIDDENLAYER);
         randomisatorWeight(networks[cpt]);
-        printf("%p\n", networks[cpt]);
+        //printf("%p\n", networks[cpt]);
     }
 
-    printf("Game to do per epoch : %d\n", SIZEPOP*SIZEPOP);
+    printf("Game to do per epoch : %d\n", SIZEPOP*(SIZEPOP-1));
+    printf("nbrReset : %d, nbrMix : %d\n",  NBRRESET, NBRMIX);
     for(cptEpoch = 0; cptEpoch < NBREPOCH; cptEpoch++)
     {
         printf("Epoch : %d\n", cptEpoch);
         for(cpt = 0; cpt < SIZEPOP; cpt++)
             networks[cpt]->score = 0;
 
-        QueryPerformanceCounter(&start);
-
         for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
-        for(cpt2 = 0; cpt2 < SIZEPOP; cpt2++)
+        for(cpt2 = 0; cpt2 < SIZEPOP && cpt1 != cpt2; cpt2++)
             playAGameNNvNN(networks[cpt1], networks[cpt2]);
-
-        QueryPerformanceCounter(&end);
-        interval = (double) (end.QuadPart - start.QuadPart) / frequency.QuadPart;
-        printf("%1.20f\n", interval);
 
         qsort(networks, SIZEPOP, sizeof(NEURALNETWORK*), cmpfunc);
 
+
         mix(networks);
+        someResets(networks);
 
         for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
             mutationsNetwork(networks[cpt1], NBRLAYERS * NBRNEURONSPERHIDDENLAYER*0.005);
 
     }
-    while(1)
-    playAGameHvNN(networks[0], 0);
+    saveNN(networks[0]);
+
+    cpt = 0;
+    while((cpt = 1 - cpt) != 2)
+    playAGameHvNN(networks[0], cpt);
     return networks;
 }
 
 
 int main(void)
 {
-    QueryPerformanceFrequency(&frequency);
     if(ITSTHEFINALCOUNTDOWN() == NULL)
         printf("PAS BON\n");
 
@@ -665,4 +718,5 @@ int main(void)
 
     return 0;
 }
+
 
