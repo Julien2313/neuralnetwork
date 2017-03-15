@@ -47,7 +47,8 @@ Temporary Items
 .apdisk
 
 #Julien's ignore
-.layout
-.depend
-.cbp
-.of.exe
+*.layout
+*.depend
+*.cbp
+*.exe
+*.o
