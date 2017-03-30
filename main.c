@@ -3,10 +3,14 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#include <string.h>
 #include <math.h>
+#include <pthread.h>
+#include <semaphore.h>
 
 
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 
@@ -14,7 +18,7 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 
 #define SIZEPOP                     100
-#define NBREPOCH                    100
+#define NBREPOCH                    1
 #define NBRMIX                      (int)((SIZEPOP/2)*0.4)
 #define NBRRESET                    (int)((SIZEPOP/2)*0.2)
 
@@ -23,12 +27,14 @@
 #define NBRCOLUMNS                  7
 #define NBRVALINCELL                3
 #define NBRCELLS                    NBRROWS * NBRCOLUMNS
-#define NBRLAYERS                   10
-#define NBRNEURONSPERHIDDENLAYER    NBRCELLS
+#define NBRLAYERS                   30
+#define NBRNEURONSPERHIDDENLAYER    NBRCELLS * 10
 #define INPUT                       0
 #define OUTPUT                      NBRLAYERS - 1
 
 #define MAXWEIGHT 2
+
+sem_t semNN[SIZEPOP];
 
 typedef struct NEURON{
     float state;
@@ -38,12 +44,19 @@ typedef struct NEURON{
 }NEURON;
 
 typedef struct{
-    int player;
+    int player, numNN;
     float score;
+    int nbrWin;
     int nbrLayers;
     int *nbrNeuronsPerLayer;
     NEURON ***neurons;
 }NEURALNETWORK;
+
+
+typedef struct{
+	int nbr1, nbr2;
+    NEURALNETWORK *n1, *n2;
+}FIGHTNN;
 
 
 typedef struct{
@@ -542,11 +555,15 @@ void saveNN(NEURALNETWORK *network)
     close(fd);*/
 }
 
-void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
+void *playAGameNNvNN(void *arg)
 {
+	FIGHTNN *NN = (FIGHTNN*) arg;
+	float score;
     NEURALNETWORK *network;
-    n1->player = 1;
-    n2->player = 0;
+    
+	
+    NN->n1->player = 1;
+    NN->n2->player = 0;
 
     CONNECTFOUR connectFour;
     CONNECTFOUR *pConnectFour;
@@ -560,13 +577,15 @@ void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
     while(pConnectFour->turn < NBRCELLS)
     {
         //printBoard(pConnectFour->board);
-        if(connectFour.player == n1->player)
-            network = n1;
+        if(connectFour.player ==  NN->n1->player)
+            network = NN->n1;
         else
-            network = n2;
+            network = NN->n2;
 
-        calculOutputNeuralNetwork(network, pConnectFour);
-        row = chooseAMoveByChance(network, pConnectFour);
+		sem_wait(&semNN[network->numNN]);
+			calculOutputNeuralNetwork(network, pConnectFour);
+			row = chooseAMoveByChance(network, pConnectFour);
+		sem_post(&semNN[network->numNN]);
         if(makeMove(pConnectFour, row) != 1)
         {
             printf("PAS BON !\n");
@@ -576,8 +595,13 @@ void playAGameNNvNN(NEURALNETWORK *n1, NEURALNETWORK *n2)
         if(isWin(pConnectFour, row))
         {
             //printBoard(pConnectFour->board);
-            network->score += (NBRCELLS*1.0/pConnectFour->turn);
-            return;
+            //soon semaphore
+            score = (NBRCELLS*1.0/pConnectFour->turn);
+			sem_wait(&semNN[network->numNN]);
+				network->score += score;
+			sem_post(&semNN[network->numNN]);
+            network->nbrWin ++;
+            break;
         }
         nextPlayer(pConnectFour);
     }
@@ -662,20 +686,32 @@ void someResets(NEURALNETWORK **networks)
 void *ITSTHEFINALCOUNTDOWN(void)
 {
     int cpt, cpt1, cpt2, cptEpoch;
-    srand(time(NULL));
-
+	pthread_t pth[SIZEPOP][SIZEPOP];
+	FIGHTNN NN[SIZEPOP][SIZEPOP];
     NEURALNETWORK **networks;
     networks = malloc(sizeof(NEURALNETWORK*) * SIZEPOP);
 
     if(networks  == NULL)
         return NULL;
-
+	
+    printf("%d\n", (int)(sizeof(NEURALNETWORK) + sizeof(int) * NBRLAYERS + sizeof(NEURON*) * NBRLAYERS + NBRLAYERS*(sizeof(NEURON*) * NBRNEURONSPERHIDDENLAYER + NBRLAYERS*(sizeof(NEURON) + sizeof(NEURON*) * NBRNEURONSPERHIDDENLAYER + sizeof(NEURON) * NBRNEURONSPERHIDDENLAYER))));
 
     for(cpt = 0; cpt < SIZEPOP; cpt++)
     {
+		if(sem_init(&semNN[cpt], 0, 1) == -1)
+		{
+			printf("Erreur de l'init sem\n");
+			return NULL;
+		}
         networks[cpt] = initNetwork(NBRCELLS * NBRVALINCELL, NBRCOLUMNS, NBRLAYERS, NBRNEURONSPERHIDDENLAYER);
+        networks[cpt]->numNN = cpt;
+        
+        printf("%p\n", networks[cpt]);
+        if(networks[cpt] == NULL)
+			return NULL;
+			
         randomisatorWeight(networks[cpt]);
-        //printf("%p\n", networks[cpt]);
+        
     }
 
     printf("Game to do per epoch : %d\n", SIZEPOP*(SIZEPOP-1));
@@ -684,13 +720,35 @@ void *ITSTHEFINALCOUNTDOWN(void)
     {
         printf("Epoch : %d\n", cptEpoch);
         for(cpt = 0; cpt < SIZEPOP; cpt++)
+        {
+            networks[cpt]->nbrWin = 0;
             networks[cpt]->score = 0;
+		}
 
         for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
-        for(cpt2 = 0; cpt2 < SIZEPOP && cpt1 != cpt2; cpt2++)
-            playAGameNNvNN(networks[cpt1], networks[cpt2]);
+        for(cpt2 = 0; cpt2 < SIZEPOP; cpt2++)
+        {
+			if(cpt1 == cpt2) continue;
+			
+			NN[cpt1][cpt2].nbr1 = cpt1;
+			NN[cpt1][cpt2].nbr2 = cpt2;
+			
+			NN[cpt1][cpt2].n1 = networks[cpt1];
+			NN[cpt1][cpt2].n2 = networks[cpt2];
+			pthread_create(&pth[cpt1][cpt2], NULL, playAGameNNvNN, &NN[cpt1][cpt2]);
+		}
+
+        for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
+        for(cpt2 = 0; cpt2 < SIZEPOP; cpt2++)
+        {
+			if(cpt1 == cpt2) continue;
+			pthread_join(pth[cpt1][cpt2], NULL);
+		}
 
         qsort(networks, SIZEPOP, sizeof(NEURALNETWORK*), cmpfunc);
+        for(cpt1 = 0; cpt1 < SIZEPOP; cpt1++)
+			printf("%d: %f\n", networks[cpt1]->nbrWin, networks[cpt1]->score);
+        printf("\n");
 
 
         mix(networks);
@@ -700,17 +758,18 @@ void *ITSTHEFINALCOUNTDOWN(void)
             mutationsNetwork(networks[cpt1], NBRLAYERS * NBRNEURONSPERHIDDENLAYER*0.005);
 
     }
+		cpt = 0;
+		while((cpt = 1 - cpt) != 2)
+		playAGameHvNN(networks[0], cpt);
     saveNN(networks[0]);
 
-    cpt = 0;
-    while((cpt = 1 - cpt) != 2)
-    playAGameHvNN(networks[0], cpt);
     return networks;
 }
 
 
 int main(void)
 {
+    srand(time(NULL));
     if(ITSTHEFINALCOUNTDOWN() == NULL)
         printf("PAS BON\n");
 
